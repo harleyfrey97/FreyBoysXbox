@@ -19,7 +19,7 @@
 .score-view-tabs{display:flex;gap:6px}.score-view-tabs .button{font-size:10px;padding:6px 9px;min-height:31px;border-radius:8px}
 .score-view-tabs .selected{background:#e6c574;border-color:#f9dd95;color:#263025}
 .score-timeline{margin-top:8px;overflow:hidden;overscroll-behavior:none}.score-timeline svg{display:block;width:100%;height:auto;overflow:visible;font-family:inherit}
-.score-stop{cursor:pointer}.score-chart-hint{font-size:11px;line-height:1.4;color:#b3c5b0;margin-top:6px}
+.score-stop{cursor:pointer}.score-chart-hint{font-size:11px;line-height:1.4;color:#b3c5b0;margin-top:6px}.score-chart-hint.final-story{font-size:11.5px;line-height:1.52;color:#d3ddc9;margin-top:9px;max-width:100%}
 .score-standing{display:flex;gap:10px;align-items:center;padding:9px 0;border-bottom:1px solid #43614855}.score-standing:last-child{border:0}
 .score-place{width:22px;text-align:center;color:#f1d58e;font-size:24px;font-weight:900}
 .score-standing-body{flex:1;min-width:0}.score-standing-label{display:flex;justify-content:space-between;align-items:baseline;gap:8px;font-size:15px}
@@ -455,6 +455,97 @@ function scoreStandingsHTML(){
  const values=people.map(p=>p.value),ranks=competitionRanks(values),maximum=Math.max(1,...values),unit=last?.unit==='chips'?'chips':'pts';people.forEach((p,i)=>p.rank=ranks[i]);people.sort((a,b)=>a.rank-b.rank||a.id-b.id);
  return people.map(p=>`<div class="score-standing"><span class="score-place">${p.rank}</span><div class="score-standing-body"><div class="score-standing-label"><strong style="color:${p.color}">${scoreEscape(p.name)}</strong><b>${p.value}<small>${unit}</small></b></div><div class="score-bar-track"><div class="score-bar" style="width:${100*p.value/maximum}%;background:${p.color}"></div></div><div class="score-standing-note">${p.house?'HOUSE':p.cpu?'CPU':'PLAYER'}${last?.kind==='game'&&!p.house?' · +'+(last.awards?.[p.id]||0)+' from '+scoreEscape(last.label):''}</div></div></div>`).join('');
 }
+function scoreNameList(names){if(!names.length)return'';if(names.length===1)return names[0];if(names.length===2)return names[0]+' and '+names[1];return names.slice(0,-1).join(', ')+', and '+names[names.length-1]}
+function scoreOrdinal(n){return['','first','second','third','fourth','fifth','sixth','seventh'][n]||String(n)}
+function scorePlacePhrase(rank,tied=false){return tied?'tied for '+scoreOrdinal(rank):scoreOrdinal(rank)}
+function finalBlackjackPeople(){
+ const last=scoreHistory[scoreHistory.length-1];if(last?.unit!=='chips')return[];
+ const people=players.map((p,i)=>({kind:'player',id:p.id,name:p.name,value:last.totals[i]||0,color:p.color}));
+ if(Number.isFinite(last.guestTotal))people.push({kind:'guest',id:98,name:last.guestName||'Frey Boy',value:last.guestTotal,color:last.guestColor||'#ffe36c'});
+ if(Number.isFinite(last.dadTotal))people.push({kind:'dad',id:99,name:'Dad',value:last.dadTotal,color:'#e9862b'});
+ const ranks=competitionRanks(people.map(p=>p.value));people.forEach((p,i)=>p.rank=ranks[i]);
+ for(const p of people)p.tied=people.filter(q=>q.rank===p.rank).length>1;
+ return people;
+}
+function finalBlackjackHeading(){
+ const people=finalBlackjackPeople(),winners=people.filter(p=>p.rank===1),dad=winners.find(p=>p.kind==='dad'),guest=winners.find(p=>p.kind==='guest'),regular=winners.filter(p=>p.kind==='player');
+ if(winners.length===1){
+  if(dad)return{title:'And the winner is... Dad?!?',subtitle:''};
+  return{title:winners[0].name+' wins Frey Boys.',subtitle:''};
+ }
+ if(dad){
+  const others=winners.filter(p=>p.kind!=='dad').map(p=>p.name);
+  const tieLine=others.length===1?'It’s a tie between '+others[0]+'... and Dad?!':scoreNameList(others)+'... and Dad?!';
+  return{title:'Wait... did no one know Dad was playing?',subtitle:tieLine};
+ }
+ if(guest){
+  const others=winners.filter(p=>p.kind!=='guest').map(p=>p.name);
+  return{title:'Wait... '+guest.name+' tied for the win?!',subtitle:guest.name+' joined for Blackjack and still tied '+scoreNameList(others)+'.'};
+ }
+ return{title:scoreNameList(regular.map(p=>p.name))+' tie for the win.',subtitle:''};
+}
+function buildFinalBlackjackStory(){
+ const last=scoreHistory[scoreHistory.length-1];if(last?.unit!=='chips')return'';
+ const bjIndex=scoreHistory.findIndex(e=>e.kind==='blackjack-start');if(bjIndex<0)return'';
+ const start=scoreHistory[bjIndex],before=scoreHistory[Math.max(0,bjIndex-1)],people=finalBlackjackPeople();
+ const regular=people.filter(p=>p.kind==='player'),guest=people.find(p=>p.kind==='guest'),dad=people.find(p=>p.kind==='dad');
+ const beforeVals=(before?.totals||players.map(p=>p.points)).map(v=>Number(v)||0),beforeRanks=competitionRanks(beforeVals),beforeMax=Math.max(...beforeVals),beforeLeaders=players.filter((p,i)=>beforeRanks[i]===1),beforeSorted=players.map((p,i)=>({p,value:beforeVals[i],rank:beforeRanks[i]})).sort((a,b)=>a.rank-b.rank||b.value-a.value||a.p.id-b.p.id);
+ const sentences=[];
+ if(beforeLeaders.length===1){
+  const lead=beforeLeaders[0],li=players.findIndex(p=>p.id===lead.id),rest=beforeSorted.filter(x=>x.p.id!==lead.id);
+  const restText=rest.map(x=>x.p.name+' at '+x.value).join(', ');
+  sentences.push(lead.name+' walked into Blackjack leading Frey Boys with '+beforeVals[li]+' points'+(restText?', followed by '+restText:'')+'.');
+ }else{
+  sentences.push(scoreNameList(beforeLeaders.map(p=>p.name))+' walked into Blackjack tied for the lead with '+beforeMax+' points.');
+ }
+ const finalRankById=new Map(regular.map(p=>[p.id,p.rank]));
+ const movement=players.map((p,i)=>({p,before:beforeRanks[i],after:finalRankById.get(p.id)||beforeRanks[i],delta:beforeRanks[i]-(finalRankById.get(p.id)||beforeRanks[i]),final:regular.find(q=>q.id===p.id)?.value||0}));
+ const risers=[...movement].sort((a,b)=>b.delta-a.delta||b.final-a.final),bestRise=risers[0];
+ const drops=[...movement].sort((a,b)=>(b.after-b.before)-(a.after-a.before)||a.final-b.final),bigDrop=drops[0];
+ const startEntries=regular.map((p,i)=>({kind:'player',name:p.name,start:Number(start.totals[i])||0,final:p.value,rank:p.rank,tied:p.tied}));
+ if(guest)startEntries.push({kind:'guest',name:guest.name,start:Number(start.guestTotal)||10,final:guest.value,rank:guest.rank,tied:guest.tied});
+ const chipLosses=startEntries.map(x=>({...x,loss:x.start-x.final})).sort((a,b)=>b.loss-a.loss||a.final-b.final),bigLoss=chipLosses[0];
+ const chipGains=startEntries.map(x=>({...x,gain:x.final-x.start})).sort((a,b)=>b.gain-a.gain||b.final-a.final),bigGain=chipGains[0];
+ const originalLeaderLost=beforeLeaders.some(p=>(finalRankById.get(p.id)||1)>1);
+ if(originalLeaderLost||(bestRise&&bestRise.delta>=2))sentences.push('Then Blackjack completely flipped the standings.');
+ if(bestRise&&bestRise.delta>0){
+  sentences.push(bestRise.p.name+' made the biggest charge, climbing from '+scoreOrdinal(bestRise.before)+' to '+scorePlacePhrase(bestRise.after,people.filter(q=>q.rank===bestRise.after).length>1)+' overall and finishing with '+bestRise.final+' chips.');
+ }else if(bigGain&&bigGain.gain>0&&bigGain.kind==='player'){
+  sentences.push(bigGain.name+' made the biggest Blackjack charge, adding '+bigGain.gain+' chips and finishing with '+bigGain.final+'.');
+ }
+ if(beforeLeaders.length===1){const lead=beforeLeaders[0],move=movement.find(m=>m.p.id===lead.id);if(move&&move.after>1&&move.p.id!==bigDrop?.p.id)sentences.push(lead.name+"'s lead disappeared, dropping him from first to "+scorePlacePhrase(move.after,people.filter(q=>q.rank===move.after).length>1)+' with '+move.final+' chips.');}
+ if(bigDrop&&bigDrop.after>bigDrop.before){
+  const lossMatch=bigLoss&&bigLoss.name===bigDrop.p.name;
+  let line=bigDrop.p.name+' had the biggest fall in the standings, dropping from '+scoreOrdinal(bigDrop.before)+' to '+scorePlacePhrase(bigDrop.after,people.filter(q=>q.rank===bigDrop.after).length>1)+'.';
+  if(lossMatch&&bigLoss.loss>0)line=bigDrop.p.name+' had the roughest trip to the table, losing '+(bigLoss.final===0?'his entire '+bigLoss.start+' chip starting stack':bigLoss.loss+' chips')+' and dropping from '+scoreOrdinal(bigDrop.before)+' to '+scorePlacePhrase(bigDrop.after,people.filter(q=>q.rank===bigDrop.after).length>1)+'.';
+  sentences.push(line);
+ }
+ if(bigLoss&&bigLoss.loss>0&&(!bigDrop||bigLoss.name!==bigDrop.p.name)){
+  sentences.push(bigLoss.name+' took the biggest chip loss, giving back '+bigLoss.loss+' of '+bigLoss.start+' starting chips and finishing with '+bigLoss.final+'.');
+ }
+ const winners=people.filter(p=>p.rank===1);
+ if(dad){
+  if(dad.rank===1&&winners.length===1)sentences.push('Dad quietly built his chips up to '+dad.value+' and stole the top spot.');
+  else if(dad.rank===1)sentences.push('Dad quietly built his chips up to '+dad.value+' and forced his way into the tie for first.');
+  else sentences.push('Dad quietly built his chips up to '+dad.value+' and finished '+scorePlacePhrase(dad.rank,dad.tied)+'.');
+ }
+ if(guest){
+  const beaten=regular.filter(p=>guest.value>p.value).map(p=>p.name),tied=regular.filter(p=>guest.value===p.value).map(p=>p.name);
+  if(guest.rank===1&&winners.length===1){
+   sentences.push(guest.name+' joined late for Blackjack with 10 chips and somehow won Frey Boys without playing the rest of Frey Boys. That feels illegal.');
+  }else if(guest.rank===1){
+   const otherWinners=winners.filter(p=>p.kind!=='guest').map(p=>p.name);
+   sentences.push(guest.name+' joined late for Blackjack with 10 chips and somehow tied '+scoreNameList(otherWinners)+' for the win. Everyone who played the whole game may want to avoid talking about that one.');
+  }else{
+   let guestLine=guest.name+' joined late for Blackjack with 10 chips and finished '+scorePlacePhrase(guest.rank,guest.tied)+' with '+guest.value+'.';
+   if(beaten.length)guestLine+=' Really stinks to be '+scoreNameList(beaten)+'. '+(beaten.length===1?'He played':'They played')+' the whole game and still lost to the guy who showed up for the last 15 hands.';
+   if(tied.length)guestLine+=' Really stinks to be '+scoreNameList(tied)+'. '+(tied.length===1?'He played':'They played')+' the whole game and still could not beat the guy who showed up for the last 15 hands.';
+   if(!beaten.length&&!tied.length&&guest.rank===Math.max(...people.map(p=>p.rank)))guestLine+=' Apparently showing up late has consequences.';
+   sentences.push(guestLine);
+  }
+ }
+ return sentences.join(' ').replace(/[–—]/g,', ');
+}
 function renderScoreRecap(){
  const events=recapEvents();if(!events.length)return;
  scoreRecap.index=clamp(scoreRecap.index,0,events.length-1);
@@ -474,7 +565,7 @@ function renderScoreRecap(){
  $('scorePrev').disabled=scoreRecap.index===0;$('scoreNext').disabled=scoreRecap.index===events.length-1;
  $('scoreWhole').classList.toggle('selected',scoreRecap.mode==='whole');$('scoreWhole').setAttribute('aria-pressed',String(scoreRecap.mode==='whole'));
  const bj=$('scoreBlackjack');if(bj){bj.classList.toggle('selected',scoreRecap.mode==='blackjack');bj.setAttribute('aria-pressed',String(scoreRecap.mode==='blackjack'))}
- $('scoreChartHint').textContent=scoreRecap.mode==='blackjack'?'Starting stack, then totals after each completed hand.':events.some(e=>e.kind==='blackjack-start')?'Stops follow the order played. BJ +5 marks the switch from points to chips.':'Each point shows the session total after a completed challenge.';
+ const finalStory=scoreRecap.context==='overall'&&scoreHistory[scoreHistory.length-1]?.unit==='chips';$('scoreChartHint').classList.toggle('final-story',finalStory);$('scoreChartHint').textContent=finalStory?(scoreRecap.finalStory||buildFinalBlackjackStory()):scoreRecap.mode==='blackjack'?'Starting stack, then totals after each completed hand.':events.some(e=>e.kind==='blackjack-start')?'Stops follow the order played. BJ +5 marks the switch from points to chips.':'Each point shows the session total after a completed challenge.';
  for(const stop of $('scoreTimeline').querySelectorAll('[data-score-index]'))stop.onclick=()=>{scoreRecap.index=Number(stop.dataset.scoreIndex);renderScoreRecap()};
 }
 function showScoreRecap(context='overall',mode='whole'){
@@ -482,10 +573,12 @@ function showScoreRecap(context='overall',mode='whole'){
  state=ride?'results':'overall';paused=false;scoreRecap={context,mode,index:0};
  const events=recapEvents();scoreRecap.index=Math.max(0,events.length-1);
  const guestTotal=blackjack&&Number.isFinite(last?.guestTotal)?last.guestTotal:null,guestName=last?.guestName||'Frey Boy',finalPeople=blackjack?[...players.map((p,i)=>({name:p.name,value:totals[i]})),...(guestTotal!==null?[{name:guestName,value:guestTotal}]:[]),...(dadTotal!==null?[{name:'Dad',value:dadTotal}]:[])]:players.map((p,i)=>({name:p.name,value:totals[i]})),finalMax=Math.max(...finalPeople.map(p=>p.value)),finalWinners=finalPeople.filter(p=>p.value===finalMax);
- const title=ride?(winners.length===1?winners[0].name+' leads into Blackjack.':'It is tied going into Blackjack.'):(blackjack&&finalWinners.length===1&&finalWinners[0].name==='Dad'?'Dad wins the house.':finalWinners.length===1?finalWinners[0].name+' wins'+(practice?' Blackjack.':' Frey Boys.'):'Shared bragging rights.');
- const note=ride?'The backyard points are in. Take a look at the lead changes, then head inside.':blackjack?'The final chip stacks decide the winner. Dad\'s orange house pile was his score all along.':'Follow the points across every completed challenge.';
+ const finalHeading=blackjack&&!ride?finalBlackjackHeading():null;
+ const title=ride?(winners.length===1?winners[0].name+' leads into Blackjack.':'It is tied going into Blackjack.'):(finalHeading?.title||(finalWinners.length===1?finalWinners[0].name+' wins'+(practice?' Blackjack.':' Frey Boys.'):'Shared bragging rights.'));
+ const note=ride?'The backyard points are in. Take a look at the lead changes, then head inside.':blackjack?(finalHeading?.subtitle||''):'Follow the points across every completed challenge.';
+ if(blackjack&&!ride)scoreRecap.finalStory=buildFinalBlackjackStory();
  const hasBlackjack=scoreHistory.some(e=>e.kind==='blackjack-start');
- showOverlay(`<div class="match-recap"><div class="eyebrow">${ride?'RIDE HOME COMPLETE · SCORE RECAP':blackjack?'BLACKJACK COMPLETE · FINAL RESULTS':'SESSION COMPLETE · SCORE RECAP'}</div><h2>${scoreEscape(title)}</h2><p class="recap-copy">${note}</p><div class="score-recap-layout"><section class="score-timeline-panel"><div class="score-chart-heading"><h3>Score timeline</h3><div class="score-view-tabs"><button class="button small selected" id="scoreWhole" aria-pressed="true">WHOLE MATCH</button>${hasBlackjack?'<button class="button small" id="scoreBlackjack" aria-pressed="false">BLACKJACK</button>':''}</div></div><div id="scoreTimeline" class="score-timeline"></div><p id="scoreChartHint" class="score-chart-hint"></p></section><section class="score-standings-panel"><h3>${ride?'Before Blackjack':'Final standings'}</h3><p class="score-chart-hint">${ride?'Session points':'Finishing place and '+(blackjack?'chip total':'total points')}</p><div id="scoreStandings"></div></section></div><section class="score-event-panel"><div class="score-event-nav"><button class="button small" id="scorePrev" aria-label="Previous scoring event">◀ PREVIOUS</button><div><strong id="scoreEventTitle"></strong><span id="scoreEventCount"></span></div><button class="button small" id="scoreNext" aria-label="Next scoring event">NEXT ▶</button></div><div id="scoreEventDetails" class="score-event-details" aria-live="polite"></div></section><div class="buttons recap-actions">${ride?button('recapBlackjack','WALK INTO THE HOUSE','primary')+button('recapRaceResults','RACE RESULTS'):practice?button('practiceAgain','REPLAY','primary')+button('practiceReturn','PRACTICE MENU'):button('newSession','ANOTHER ROUND','primary')+button('finalTitle','TITLE SCREEN')}</div></div>`,true);
+ showOverlay(`<div class="match-recap"><div class="eyebrow">${ride?'RIDE HOME COMPLETE · SCORE RECAP':blackjack?'BLACKJACK COMPLETE · FINAL RESULTS':'SESSION COMPLETE · SCORE RECAP'}</div><h2>${scoreEscape(title)}</h2>${note?`<p class="recap-copy">${scoreEscape(note)}</p>`:''}<div class="score-recap-layout"><section class="score-timeline-panel"><div class="score-chart-heading"><h3>Score timeline</h3><div class="score-view-tabs"><button class="button small selected" id="scoreWhole" aria-pressed="true">WHOLE MATCH</button>${hasBlackjack?'<button class="button small" id="scoreBlackjack" aria-pressed="false">BLACKJACK</button>':''}</div></div><div id="scoreTimeline" class="score-timeline"></div><p id="scoreChartHint" class="score-chart-hint"></p></section><section class="score-standings-panel"><h3>${ride?'Before Blackjack':'Final standings'}</h3><p class="score-chart-hint">${ride?'Session points':'Finishing place and '+(blackjack?'chip total':'total points')}</p><div id="scoreStandings"></div></section></div><section class="score-event-panel"><div class="score-event-nav"><button class="button small" id="scorePrev" aria-label="Previous scoring event">◀ PREVIOUS</button><div><strong id="scoreEventTitle"></strong><span id="scoreEventCount"></span></div><button class="button small" id="scoreNext" aria-label="Next scoring event">NEXT ▶</button></div><div id="scoreEventDetails" class="score-event-details" aria-live="polite"></div></section><div class="buttons recap-actions">${ride?button('recapBlackjack','WALK INTO THE HOUSE','primary')+button('recapRaceResults','RACE RESULTS'):practice?button('practiceAgain','REPLAY','primary')+button('practiceReturn','PRACTICE MENU'):button('newSession','ANOTHER ROUND','primary')+button('finalTitle','TITLE SCREEN')}</div></div>`,true);
  overlay.querySelector('.panel')?.classList.add('recap-panel');
  on('scorePrev',()=>{scoreRecap.index--;renderScoreRecap()});on('scoreNext',()=>{scoreRecap.index++;renderScoreRecap()});
  const switchMode=mode=>{scoreRecap.mode=mode;scoreRecap.index=recapEvents().length-1;renderScoreRecap()};
@@ -1197,7 +1290,7 @@ function drawRace(){
 // Additional Frey Boys mini-games: independent compact game loops.
 function initMower(adv){
  const actors=players.map((p,i)=>({id:i,x:0,y:0,alive:true,life:999,elimOrder:0,sticks:0,facing:-Math.PI/2,moving:false,runnerX:0,runnerY:0,runnerSide:0,runnerOnTrack:false,lastRound4Zone:-1,delay:0,cpuThink:rnd(.18,.5),cpuTarget:null,cpuWaypoint:null,cpuSide:i%2?1:-1,stuckTime:0,lastCpuX:0,lastCpuY:0,lastPickup:0}));
- game={advantage:adv,actors,countdown:3,time:0,round:1,mowerY:270,mowerX:145,mowerDir:1,mowerFacing:0,sticks:[],roundBreak:0,cutRows:[],sections:[],elimCounter:0,perimeter:null,perimeterDone:[],survivalOnly:false,round3Resolving:false,round4Ending:false,trees:[],transitionTargets:null};
+ game={advantage:adv,actors,countdown:3,time:0,round:1,mowerY:270,mowerX:145,mowerDir:1,mowerFacing:0,sticks:[],roundBreak:0,cutRows:[],sections:[],elimCounter:0,perimeter:null,perimeterDone:[],survivalOnly:false,round3Resolving:false,round4Ending:false,trees:[],transitionTargets:null,round4Respawns:[],round4TreeShake:0};
  makeSticks();
 }
 function mowerAlive(){return game.actors.filter(a=>a.alive)}
@@ -1260,10 +1353,12 @@ function spawnPerimeterStick(owner){
   else if(edge===1){x=r-band;y=t+Math.random()*(b-t)}
   else if(edge===2){x=l+Math.random()*(r-l);y=b-band}
   else{x=l+band;y=t+Math.random()*(b-t)}
-  // Only the very first straightaway is guaranteed clear. Once Dad reaches the first turn, that protection is gone.
-  if(p.inset===0&&p.side===0&&y<p.top+82)continue;
-  const mowerGap=Math.hypot(x-game.mowerX,y-game.mowerY),playerGap=Math.hypot(x-actor.x,y-actor.y),stickGap=game.sticks.reduce((m,s)=>s.picked?m:Math.min(m,Math.hypot(x-s.x,y-s.y)),9999);
-  if(mowerGap<68||playerGap<74||stickGap<38)continue;
+  // Keep respawns out of the mower's immediate path: roughly 4-5 mower lengths ahead, without blocking the whole yard.
+  const mx=Math.cos(game.mowerFacing),my=Math.sin(game.mowerFacing),rx=x-game.mowerX,ry=y-game.mowerY;
+  const ahead=rx*mx+ry*my,lateral=Math.abs(rx*(-my)+ry*mx);
+  if(ahead>-35&&ahead<290&&lateral<92)continue;
+  const mowerGap=Math.hypot(rx,ry),playerGap=Math.hypot(x-actor.x,y-actor.y),stickGap=game.sticks.reduce((m,s)=>s.picked?m:Math.min(m,Math.hypot(x-s.x,y-s.y)),9999);
+  if(mowerGap<78||playerGap<74||stickGap<38)continue;
   const edgeDist=Math.min(x-l,r-x,y-t,b-y),zone=(y<(t+b)/2?0:2)+(x<(l+r)/2?0:1),zoneBonus=zone!==actor.lastRound4Zone?65:0;
   // Best targets sit close enough to Dad's future path to create pressure, without being impossible.
   const pressure=130-Math.abs(edgeDist-62),score=pressure+zoneBonus+Math.min(playerGap,190)*.16;
@@ -1274,7 +1369,25 @@ function spawnPerimeterStick(owner){
 function spawnPerimeterWave(){
  if(game.round4Ending)return;const p=game.perimeter,alive=mowerAlive(),l=p.left+p.inset+22,r=p.right-p.inset-22,t=p.top+p.inset+22,b=p.bottom-p.inset-22;
  if(r-l<150||b-t<150){endRound4Tie();return}
- const amount=Math.max(5,8-Math.floor(p.inset/60));game.sticks=[];for(const a of alive)for(let j=0;j<amount;j++)spawnPerimeterStick(a.id);
+ game.sticks=[];game.round4Respawns=[];for(const a of alive)for(let j=0;j<12;j++)spawnPerimeterStick(a.id);
+}
+function queueRound4Respawn(owner){
+ if(game.round!==4||game.round4Ending||!game.actors[owner]?.alive)return;
+ game.round4Respawns.push({owner,due:game.time+rnd(2,4)});
+}
+function updateRound4Respawns(dt){
+ if(game.round!==4||game.round4Ending)return;
+ game.round4TreeShake=Math.max(0,(game.round4TreeShake||0)-dt);
+ const ready=game.round4Respawns.filter(r=>r.due<=game.time);
+ if(!ready.length)return;
+ const windowEnd=game.time+.35,batch=game.round4Respawns.filter(r=>r.due<=windowEnd),keep=game.round4Respawns.filter(r=>r.due>windowEnd);
+ let spawned=0;
+ for(const r of batch){
+  if(!game.actors[r.owner]?.alive)continue;
+  if(spawnPerimeterStick(r.owner))spawned++;else{r.due=game.time+.45;keep.push(r)}
+ }
+ game.round4Respawns=keep;
+ if(spawned)game.round4TreeShake=.42;
 }
 function makeSticks(){
  game.roundBreak=0;game.cutRows=[];game.perimeterDone=[];game.survivalOnly=false;game.transitionTargets=null;game.trees=[];
@@ -1297,7 +1410,7 @@ function makeSticks(){
  }else{
   game.round=4;game.sections=[];
   const alive=mowerAlive();alive.forEach((a,i)=>{a.x=250+(i+.5)*(940/Math.max(1,alive.length));a.y=650;a.sticks=0;a.moving=false;a.cpuTarget=null;a.cpuThink=rnd(.18,.5);a.delay=0});
-  game.trees=[{x:720,y:485,r:62}];
+  game.trees=[{x:720,y:485,r:86,centerpiece:true}];
   game.perimeter={left:125,right:1315,top:225,bottom:765,inset:0,side:0,shrink:52,survivalInset:156,finishInset:224};
   game.mowerX=game.perimeter.left;game.mowerY=game.perimeter.top;game.mowerFacing=0;spawnPerimeterWave();
  }
@@ -1310,8 +1423,19 @@ function finalMowerResults(label){
 function eliminateMowerPlayer(id){
  const a=game.actors[id];if(!a||!a.alive)return;
  a.alive=false;a.life=game.round;a.elimOrder=++game.elimCounter;setRunnerStart(a);
+ if(game.round===4){
+  game.sticks=game.sticks.filter(s=>s.owner!==id);
+  game.round4Respawns=game.round4Respawns.filter(r=>r.owner!==id);
+  a.cpuTarget=null;
+ }
 }
 function endMowerRound(loser=null){
+ if(game.round===4){
+  if(loser!==null)eliminateMowerPlayer(loser);
+  const alive=mowerAlive();
+  if(alive.length<=1)finalMowerResults(alive.length===1?'LAST ONE STANDING':'NO SURVIVORS');
+  return;
+ }
  if(loser!==null)eliminateMowerPlayer(loser);
  game.roundBreak=1.35;const survivors=mowerAlive();game.transitionTargets={};survivors.forEach((a,i)=>game.transitionTargets[a.id]={x:220+(i+.5)*(1000/Math.max(1,survivors.length)),y:710});
  setTimeout(()=>{
@@ -1319,14 +1443,6 @@ function endMowerRound(loser=null){
   const alive=mowerAlive();
   if(alive.length<=1){finalMowerResults(alive.length===1?'LAST ONE STANDING':'NO SURVIVORS');return}
   if(game.round<3){game.round++;makeSticks();return}
-  // Round 4 stays the shrinking-perimeter finale. Eliminated runners keep running while survivors reset inside the remaining yard.
-  const p=game.perimeter;
-  if(p&&p.inset>=p.finishInset){finalMowerResults('SURVIVED THE SHRINK');return}
-  if(p){
-   const aliveNow=mowerAlive();aliveNow.forEach((a,i)=>{const l=p.left+p.inset+40,r=p.right-p.inset-40,t=p.top+p.inset+40,b=p.bottom-p.inset-40;a.x=lerp(l,r,(i+1)/(aliveNow.length+1));a.y=clamp(b-45,t+25,b-25);a.moving=false});
-   if(!game.survivalOnly&&game.sticks.every(s=>s.picked||!game.actors[s.owner].alive))spawnPerimeterWave();
-  }
-  game.roundBreak=0;
  },1350);
 }
 function advancePerimeter(dt){
@@ -1338,7 +1454,6 @@ function advancePerimeter(dt){
  if(d<=step){game.mowerX=tx;game.mowerY=ty;p.side=(p.side+1)%4;if(p.side===0){game.perimeterDone.push(p.inset);p.inset+=p.shrink;
    if(p.inset>=p.survivalInset){endRound4Tie();return true}
    game.mowerX=p.left+p.inset;game.mowerY=p.top+p.inset;
-   if(game.sticks.every(s=>s.picked||!game.actors[s.owner].alive))spawnPerimeterWave();
  }}else{game.mowerX+=dx/d*step;game.mowerY+=dy/d*step}
  return false;
 }
@@ -1353,6 +1468,7 @@ function updateMower(dt){
   if(game.mowerDir>0&&game.mowerX>=rightEdge){game.mowerX=rightEdge;game.cutRows.push(game.mowerY);game.mowerY+=78;game.mowerDir=-1}
   else if(game.mowerDir<0&&game.mowerX<=leftEdge){game.mowerX=leftEdge;game.cutRows.push(game.mowerY);game.mowerY+=78;game.mowerDir=1}
  }else if(game.round===4&&advancePerimeter(dt))return;
+ if(game.round===4)updateRound4Respawns(dt);
  const alive=mowerAlive();
  for(const a of alive){
   a.delay=Math.max(0,(a.delay||0)-dt);
@@ -1378,9 +1494,8 @@ function updateMower(dt){
   const mdx=a.x-ox,mdy=a.y-oy,stepSpeed=Math.hypot(mdx,mdy)/Math.max(dt,.001);a.moving=Math.hypot(mdx,mdy)>.2;a.moveScore=lerp(a.moveScore??0,stepSpeed,Math.min(1,dt*2.8));if(a.moving)a.facing=Math.atan2(mdy,mdx);
   const pickedNow=[];
   for(const s of game.sticks)if(!s.picked&&(game.round===3?s.owner===-1:s.owner===a.id)&&Math.hypot(a.x-s.x,a.y-s.y)<31){s.picked=true;a.sticks++;a.lastPickup=game.time;pickedNow.push(s)}
-  if(game.round===4&&!game.round4Ending)for(const _ of pickedNow)spawnPerimeterStick(a.id);
+  if(game.round===4&&!game.round4Ending)for(const _ of pickedNow)queueRound4Respawn(a.id);
  }
- if(game.round===4){for(let i=0;i<alive.length;i++)for(let j=i+1;j<alive.length;j++){const a=alive[i],b=alive[j];if(Math.hypot(a.x-b.x,a.y-b.y)<31){a.delay=Math.max(a.delay||0,.42);b.delay=Math.max(b.delay||0,.42);const dx=a.x-b.x,dy=a.y-b.y,d=Math.hypot(dx,dy)||1;a.x+=dx/d*7;a.y+=dy/d*7;b.x-=dx/d*7;b.y-=dy/d*7}}}
  if(game.round!==3){
   for(const a of alive)if(Math.hypot(a.x-game.mowerX,a.y-game.mowerY)<40){endMowerRound(a.id);return}
   for(const st of game.sticks)if(!st.picked&&game.actors[st.owner].alive&&Math.hypot(st.x-game.mowerX,st.y-game.mowerY)<37){endMowerRound(st.owner);return}
@@ -1393,6 +1508,24 @@ function updateMower(dt){
  }
 
 }
+function drawPickupSticksMowerUnit(){
+ // Same mower and Dad layout used in Rounds 1, 2, and 4. The mower rotates, Dad is positioned separately behind it.
+ const heading=Number.isFinite(game.mowerFacing)?game.mowerFacing:0;
+ const backX=-Math.cos(heading),backY=-Math.sin(heading);
+ const dadGap=88,dadX=game.mowerX+backX*dadGap,dadY=game.mowerY+backY*dadGap;
+ ctx.save();ctx.translate(game.mowerX,game.mowerY);ctx.rotate(heading);
+ ctx.lineWidth=1;
+ for(const [wx,wy] of [[-25,-31],[-25,31],[25,-31],[25,31]]){circle(wx,wy,9,'#161c1b','#5b625f');circle(wx,wy,3,'#8f9893')}
+ rr(-31,-28,62,56,13,'#c92e24','#ff9f92');
+ rr(18,-18,18,36,6,'#a8201b','#ef7f75');
+ circle(5,0,15,'#202826','#7b8580');circle(5,0,7,'#39413e');
+ ctx.strokeStyle='#3d332c';ctx.lineWidth=5;ctx.lineCap='round';
+ ctx.beginPath();ctx.moveTo(-24,-20);ctx.lineTo(-61,-34);ctx.lineTo(-78,-34);ctx.moveTo(-24,20);ctx.lineTo(-61,34);ctx.lineTo(-78,34);ctx.moveTo(-78,-34);ctx.lineTo(-78,34);ctx.stroke();
+ ctx.restore();
+ ctx.lineWidth=1;
+ drawPerson({id:-1,x:dadX,y:dadY,facing:heading,stun:0,moving:true},'#e57d2d');
+ text('DAD',dadX,dadY-34,13,'#ffd7b1','center',950);
+}
 function drawMower(){
  ctx.fillStyle='#315f31';ctx.fillRect(0,0,W,H);
  if(game.round<3){
@@ -1401,33 +1534,25 @@ function drawMower(){
   ctx.fillStyle='#376f36';ctx.fillRect(90,190,1260,620);
  }else{
   ctx.fillStyle='#376f36';ctx.fillRect(90,190,1260,620);
-  ctx.strokeStyle='#78ad59';ctx.lineWidth=50;
+  ctx.save();ctx.strokeStyle='#78ad59';ctx.lineWidth=50;
   for(const inset of game.perimeterDone){const p=game.perimeter;ctx.strokeRect(p.left+inset,p.top+inset,p.right-p.left-inset*2,p.bottom-p.top-inset*2)}
-  const p=game.perimeter;if(p){const l=p.left+p.inset,r=p.right-p.inset,t=p.top+p.inset,b=p.bottom-p.inset;ctx.strokeStyle='#78ad59';ctx.lineWidth=50;ctx.beginPath();ctx.moveTo(l,t);if(p.side===0)ctx.lineTo(game.mowerX,t);else{ctx.lineTo(r,t);if(p.side===1)ctx.lineTo(r,game.mowerY);else{ctx.lineTo(r,b);if(p.side===2)ctx.lineTo(game.mowerX,b);else{ctx.lineTo(l,b);ctx.lineTo(l,game.mowerY)}}}ctx.stroke();}
+  const p=game.perimeter;if(p){const l=p.left+p.inset,r=p.right-p.inset,t=p.top+p.inset,b=p.bottom-p.inset;ctx.beginPath();ctx.moveTo(l,t);if(p.side===0)ctx.lineTo(game.mowerX,t);else{ctx.lineTo(r,t);if(p.side===1)ctx.lineTo(r,game.mowerY);else{ctx.lineTo(r,b);if(p.side===2)ctx.lineTo(game.mowerX,b);else{ctx.lineTo(l,b);ctx.lineTo(l,game.mowerY)}}}ctx.stroke();}
+  ctx.restore();
  }
- for(const t of game.trees||[])tree(t.x,t.y,t.r,2);
+ for(const t of game.trees||[]){
+  if(t.centerpiece&&game.round===4){
+   const shake=game.round4TreeShake>0?Math.sin(animTime*55)*7*(game.round4TreeShake/.42):0;
+   ctx.save();ctx.translate(shake,0);
+   circle(t.x,t.y+14,t.r*.46,'#1c351f','#7b5b37');
+   tree(t.x,t.y,t.r,2);
+   ctx.strokeStyle='#9bc66b88';ctx.lineWidth=4;ctx.beginPath();ctx.arc(t.x,t.y,t.r*.98,0,TAU);ctx.stroke();
+   ctx.restore();
+  }else tree(t.x,t.y,t.r,2);
+ }
  for(const sec of game.sections||[]){ctx.strokeStyle=players[sec.owner].color;ctx.globalAlpha=.8;ctx.lineWidth=3;ctx.setLineDash([10,9]);ctx.beginPath();ctx.moveTo(sec.left,228);ctx.lineTo(sec.left,760);ctx.stroke();ctx.setLineDash([]);ctx.globalAlpha=1;rr(sec.left+7,235,Math.max(82,sec.right-sec.left-14),24,6,'#11251bbb',players[sec.owner].color);text(players[sec.owner].name.toUpperCase(),(sec.left+sec.right)/2,247,10,players[sec.owner].color,'center',950)}
  if(game.sections?.length){const last=game.sections[game.sections.length-1];ctx.strokeStyle=players[last.owner].color;ctx.globalAlpha=.8;ctx.lineWidth=3;ctx.setLineDash([10,9]);ctx.beginPath();ctx.moveTo(last.right,228);ctx.lineTo(last.right,760);ctx.stroke();ctx.setLineDash([]);ctx.globalAlpha=1}
  for(const s of game.sticks)if(!s.picked&&(s.owner===-1||game.actors[s.owner]?.alive)){const sc=s.owner===-1?'#b88955':players[s.owner].color;ctx.save();ctx.strokeStyle=sc;ctx.lineWidth=7;ctx.lineCap='round';ctx.beginPath();ctx.moveTo(s.x-10,s.y-5);ctx.lineTo(s.x+11,s.y+6);ctx.stroke();ctx.restore()}
- if(game.round!==3){
- // Improved push-mower visual: constant size, four wheels, engine deck, chute, and a proper handle with Dad trailing behind.
- const heading=game.mowerFacing;
- const backX=-Math.cos(heading),backY=-Math.sin(heading);
- const dadGap=88,dadX=game.mowerX+backX*dadGap,dadY=game.mowerY+backY*dadGap;
- ctx.save();ctx.translate(game.mowerX,game.mowerY);ctx.rotate(heading);
- // Wheels at the four corners.
- for(const [wx,wy] of [[-25,-31],[-25,31],[25,-31],[25,31]]){circle(wx,wy,9,'#161c1b','#5b625f');circle(wx,wy,3,'#8f9893')}
- // Red mower deck and black engine.
- rr(-31,-28,62,56,13,'#c92e24','#ff9f92');
- rr(18,-18,18,36,6,'#a8201b','#ef7f75');
- circle(5,0,15,'#202826','#7b8580');circle(5,0,7,'#39413e');
- // Handle arms extend behind the mower toward Dad.
- ctx.strokeStyle='#3d332c';ctx.lineWidth=5;ctx.lineCap='round';
- ctx.beginPath();ctx.moveTo(-24,-20);ctx.lineTo(-61,-34);ctx.lineTo(-78,-34);ctx.moveTo(-24,20);ctx.lineTo(-61,34);ctx.lineTo(-78,34);ctx.moveTo(-78,-34);ctx.lineTo(-78,34);ctx.stroke();
- ctx.restore();
- drawPerson({id:-1,x:dadX,y:dadY,facing:heading,stun:0,moving:true},'#e57d2d');
- text('DAD',dadX,dadY-34,13,'#ffd7b1','center',950);
- }
+ if(game.round!==3)drawPickupSticksMowerUnit();
  game.actors.forEach(a=>{if(a.alive)drawPerson({id:a.id,x:a.x,y:a.y,facing:a.facing,stun:0,moving:a.moving},players[a.id].color);else{drawPerson({id:a.id,x:a.runnerX,y:a.runnerY,facing:a.facing,stun:0,moving:true},players[a.id].color);text(players[a.id].name.toUpperCase(),a.runnerX,a.runnerY-25,8,players[a.id].color,'center',850)}});
  if(game.round===3){const alive=mowerAlive(),boxW=Math.min(190,1120/Math.max(1,alive.length)),start=720-(boxW*alive.length)/2;alive.forEach((a,i)=>{const x=start+i*boxW;rr(x+4,145,boxW-8,45,9,'#12261ddd',players[a.id].color);text(players[a.id].name.toUpperCase(),x+boxW/2,159,9,players[a.id].color,'center',900);text(String(a.sticks)+' STICKS',x+boxW/2,177,14,'#fff0bd','center',950)})}
  if(game.roundBreak>0&&game.transitionTargets)text('MOVING TO THE NEXT PART OF THE YARD',720,214,15,'#ffe49b','center',950);
@@ -2759,10 +2884,11 @@ function drCpuInaccuracy(a){
  return{aim:rnd(-1,1)*skill.aim*style*stroke,power:rnd(-1,1)*skill.power*style*stroke,lead:rnd(-1,1)*skill.lead*(a.persona===3?.9:1)};
 }
 function drOnGreen(x,y,pad=0){return DR_GREENS.find(z=>{const dx=(x-z.x)/(z.rx+pad),dy=(y-z.y)/(z.ry+pad);return dx*dx+dy*dy<1+.11*Math.sin(Math.atan2(dy,dx)*3+z.phase)})}
-function drPoint(a,power){const angle=a.aim;const length=70+power*570;return{x:clamp(a.x+Math.sin(angle)*length,340,1100),y:clamp(716-Math.cos(angle)*length,135,725)}}
+function drLaunchPoint(a){return{x:a.x+28,y:a.y}}
+function drPoint(a,power){const angle=a.aim,length=70+power*570,o=drLaunchPoint(a);return{x:clamp(o.x+Math.sin(angle)*length,340,1100),y:clamp(o.y-Math.cos(angle)*length,135,725)}}
 function drBall(x,y,owner=-1){return{x,y,owner,vx:0,vy:0,z:0,vz:0,age:0,settled:true,scored:false,active:false}}
 function initDrivingRange(adv){const scattered=[];for(let i=0;i<32;i++){let x=rnd(350,1090),y=rnd(155,720);if(drOnGreen(x,y)){i--;continue}scattered.push(drBall(x,y,-1))}game={advantage:adv,time:0,countdown:3,beat:3,balls:scattered,actors:players.map((p,i)=>({id:i,x:330+i*255,y:742,aim:(i-1.5)*.10,aimPower:.48,charge:0,charging:false,shots:0,score:0,shotCooldown:0,cpuWait:rnd(.3,1.2),cpuPlan:null,recentTargets:[],persona:i,flash:0})),retriever:{x:80,y:560,target:null,count:0,off:0,speed:95,hit:0,active:true},npc:null,npcCount:0,npcNext:rnd(13,22),squirrels:[{x:420,y:505,v:75,flee:0},{x:1010,y:350,v:-95,flee:0}],resolving:false};const bank=shuffledCpuPersonalityIndices(6);game.actors.forEach(a=>{a.persona=players[a.id].cpu?bank.pop():null});}
-function drShot(a,power,aim=a.aim){const target=drPoint({...a,aim},power),flight=.48+power*.65,b=drBall(a.x,a.y-28,a.id);b.active=true;b.settled=false;b.z=8;b.vx=(target.x-b.x)/flight;b.vy=(target.y-b.y)/flight;b.vz=160*flight-b.z/flight;b.flight=flight;b.first=false;b.launchX=b.x;b.launchY=b.y;b.markerFade=0;const hit=drFirstImpact(b);b.firstMarker={x:hit.x,y:hit.y};return b;}
+function drShot(a,power,aim=a.aim){const target=drPoint({...a,aim},power),flight=.48+power*.65,o=drLaunchPoint(a),b=drBall(o.x,o.y,a.id);b.active=true;b.settled=false;b.z=8;b.vx=(target.x-b.x)/flight;b.vy=(target.y-b.y)/flight;b.vz=160*flight-b.z/flight;b.flight=flight;b.first=false;b.launchX=b.x;b.launchY=b.y;b.markerFade=0;const hit=drFirstImpact(b);b.firstMarker={x:hit.x,y:hit.y};return b;}
 function drFirstImpact(b){
  const ground=Math.max(0,(b.vz+Math.sqrt(Math.max(0,b.vz*b.vz+640*b.z)))/320);let time=ground,bunker=false;
  // The sand catches low balls before grass-level contact; preview and flight use the same event.
@@ -2779,9 +2905,9 @@ function drAdvanceBall(b,dt){if(b.settled)return;
  if(b.y<=183&&b.z<=6){b.z=0;b.vz=0;b.vx=0;b.vy=0;b.settled=true;b.active=false;b.bunker=true;}
  if(b.z===0&&Math.hypot(b.vx,b.vy)<7){b.settled=true;b.active=false;}}
 function drPredictRest(a,power,aim){const b=drShot(a,power,aim);for(let t=0;t<6&&!b.settled;t+=1/60)drAdvanceBall(b,1/60);return b;}
-function drSolveGreen(a,target){let aim=clamp(Math.atan2(target.x-a.x,716-target.y),-1.18,1.18),power=clamp((Math.hypot(target.x-a.x,716-target.y)/1.16-70)/570,0,1),rest;
+function drSolveGreen(a,target){const o=drLaunchPoint(a);let aim=clamp(Math.atan2(target.x-o.x,o.y-target.y),-1.18,1.18),power=clamp((Math.hypot(target.x-o.x,o.y-target.y)/1.16-70)/570,0,1),rest;
  // Work backward from where the ball stops, rather than aiming its first bounce at the flag.
- for(let i=0;i<7;i++){rest=drPredictRest(a,power,aim);const ex=target.x-rest.x,ey=target.y-rest.y;if(Math.hypot(ex,ey)<1.5)break;const first=drPoint({...a,aim},power),tx=first.x+ex/1.16,ty=first.y+ey/1.16;aim=clamp(Math.atan2(tx-a.x,716-ty),-1.18,1.18);power=clamp((Math.hypot(tx-a.x,716-ty)-70)/570,0,1);}
+ for(let i=0;i<7;i++){rest=drPredictRest(a,power,aim);const ex=target.x-rest.x,ey=target.y-rest.y;if(Math.hypot(ex,ey)<1.5)break;const first=drPoint({...a,aim},power),tx=first.x+ex/1.16,ty=first.y+ey/1.16;aim=clamp(Math.atan2(tx-o.x,o.y-ty),-1.18,1.18);power=clamp((Math.hypot(tx-o.x,o.y-ty)-70)/570,0,1);}
  rest=drPredictRest(a,power,aim);return{aim,power,rest,target:'green'};}
 function drBonusPlans(a,leadError=0){const g=game,targets=[],r=g.retriever;
  // Aim at where a bonus will be after the same charge time and flight as a human shot.
@@ -2789,7 +2915,7 @@ function drBonusPlans(a,leadError=0){const g=game,targets=[],r=g.retriever;
  if(r.active)targets.push({key:'bonus:retriever',type:'retriever',points:40,position:walk(r.x,r.y,r.target?.x??720,r.target?.y??480,r.speed)});
  if(g.npc){const n=g.npc,tx=n.phase===0?n.ballX:n.side<0?300:1140;targets.push({key:'bonus:golfer',type:'golfer',points:55,position:walk(n.x,n.y,tx,n.ballY,100*n.fast,n.wait)});}
  g.squirrels.forEach((q,i)=>{if(q.flee||q.hidden>0)return;targets.push({key:'bonus:squirrel:'+i,type:'squirrel',points:85,position:time=>{let x=q.x,y=q.y,v=q.v;const steps=Math.max(1,Math.ceil(time*12)),dt=time/steps;for(let k=0;k<steps;k++){x+=v*dt;y+=Math.sin((g.time+(k+1)*dt)*1.8+x*.015)*16*dt;if(x<360){x=720-x;v=Math.abs(v)}else if(x>1080){x=2160-x;v=-Math.abs(v)}}return{x,y}}});});
- const plans=[];for(const t of targets){let power=.4,aim=0,point=t.position(0);for(let i=0;i<6;i++){const lead=Math.max(0,power-a.charge)/DR_CHARGE_RATE+.48+power*.65;point=t.position(Math.max(0,lead+leadError));aim=Math.atan2(point.x-a.x,716-point.y);power=(Math.hypot(point.x-a.x,716-point.y)-70)/570;}if(Math.abs(aim)<=1.18&&power>=.03&&power<=1){const p=drPoint({...a,aim},power);if(Math.hypot(p.x-point.x,p.y-point.y)<12)plans.push({aim,power,target:t.type,key:t.key,category:'bonus',weight:Math.pow(t.points,.45)});}}
+ const plans=[];for(const t of targets){let power=.4,aim=0,point=t.position(0);for(let i=0;i<6;i++){const lead=Math.max(0,power-a.charge)/DR_CHARGE_RATE+.48+power*.65;point=t.position(Math.max(0,lead+leadError));const o=drLaunchPoint(a);aim=Math.atan2(point.x-o.x,o.y-point.y);power=(Math.hypot(point.x-o.x,o.y-point.y)-70)/570;}if(Math.abs(aim)<=1.18&&power>=.03&&power<=1){const p=drPoint({...a,aim},power);if(Math.hypot(p.x-point.x,p.y-point.y)<12)plans.push({aim,power,target:t.type,key:t.key,category:'bonus',weight:Math.pow(t.points,.45)});}}
  return plans;}
 function drCpuPlan(a){const error=drCpuInaccuracy(a),greens=[];for(let i=0;i<DR_GREENS.length;i++){const z=DR_GREENS[i];let shot=drSolveGreen(a,z);if(drOnGreen(shot.rest.x,shot.rest.y)!==z){const edges=[-.42,.42].map(v=>drSolveGreen(a,{x:z.x+z.rx*v,y:z.y}));shot=edges.find(p=>drOnGreen(p.rest.x,p.rest.y)===z)||shot;}if(drOnGreen(shot.rest.x,shot.rest.y)===z){const style=a.persona===0?[1.4,1.3,.8]:a.persona===1?[.55,1,1.45]:a.persona===2?[1.15,1.2,1]:[1,1,1];greens.push({...shot,key:'green:'+i,category:'green',weight:Math.pow(z.points,.45)*style[i]});}}
  const bonuses=drBonusPlans(a,error.lead),recent=a.recentTargets||[],last=recent[recent.length-1];let candidates;
@@ -2821,7 +2947,7 @@ function updateDrivingRange(dt){const g=game,timeOver=g.time>=90;g.resolving=tim
  if(timeOver&&g.balls.every(b=>b.settled)){finishGame(g.actors.map(a=>a.score),g.actors.map(a=>a.score+' range points'))}}
 function drAimPreview(a){return drShot(a,a.charging?a.charge:a.aimPower??.48)}
 function drDrawCooldownRing(cx,cy,a,color){if(!a)return;const ready=a.shotCooldown<=0,progress=clamp(1-a.shotCooldown/DR_SHOT_COOLDOWN,0,1);ctx.save();ctx.lineWidth=2.5;ctx.strokeStyle='#526757';ctx.beginPath();ctx.arc(cx,cy,8.5,0,TAU);ctx.stroke();ctx.strokeStyle=color;ctx.beginPath();ctx.arc(cx,cy,8.5,-Math.PI/2,-Math.PI/2+TAU*progress);ctx.stroke();if(ready)circle(cx,cy,2,color);else text((Math.ceil(a.shotCooldown*10)/10).toFixed(1),cx,cy,8,'#fff0ca','center',800);ctx.restore()}
-function drawDrivingRange(){const g=game;ctx.fillStyle='#426d3e';ctx.fillRect(0,96,W,710);rr(315,106,810,676,16,'#6b9850','#a7bd79');for(let i=0;i<9;i++){ctx.strokeStyle=i%2?'#7daa60':'#80a967';ctx.lineWidth=16;ctx.beginPath();ctx.moveTo(355+i*90,120);ctx.lineTo(355+i*90,730);ctx.stroke()}for(const treeX of [344,1090]){ctx.fillStyle='#694a2e';rr(treeX-8,143,16,85,4,'#694a2e','#4c3827');for(const [ox,oy,r] of [[0,143,39],[-24,155,30],[24,155,30],[0,121,28]])circle(treeX+ox,oy,r,'#3e763c','#285c2e')}for(const z of DR_GREENS){ctx.save();ctx.translate(z.x,z.y);ctx.beginPath();for(let j=0;j<=50;j++){const t=j/50*TAU,rad=1+.055*Math.sin(t*3+z.phase);const x=Math.cos(t)*z.rx*rad,y=Math.sin(t)*z.ry*rad;if(j===0)ctx.moveTo(x,y);else ctx.lineTo(x,y)}ctx.closePath();ctx.fillStyle='#9dd476';ctx.fill();ctx.strokeStyle='#d3ec9c';ctx.lineWidth=3;ctx.stroke();ctx.restore();ctx.strokeStyle='#f4e5ba';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(z.x,z.y+6);ctx.lineTo(z.x,z.y-28);ctx.stroke();ctx.fillStyle='#f6cf61';ctx.beginPath();ctx.moveTo(z.x,z.y-28);ctx.lineTo(z.x+17,z.y-22);ctx.lineTo(z.x,z.y-16);ctx.fill();text('+'+z.points,z.x,z.y+z.ry+16,12,'#fff4c9','center',900)}rr(317,154,806,29,4,'#d4bc87','#f3e0ae');for(let k=0;k<26;k++)circle(331+k*30,164+(k%3)*4,2,'#bfa36d');for(const b of g.balls){if(b.collected)continue;const color=b.owner<0?'#e9e4c9':players[b.owner].color;circle(b.x,b.y,5.3,color,'#1d3621');if(b.z>0){ctx.globalAlpha=.22;circle(b.x+5,b.y+3,5,'#132f1c');ctx.globalAlpha=1;circle(b.x,b.y-b.z,7,color,'#fff4d0')}}for(const treeX of [344,1090]){rr(treeX-8,143,16,85,4,'#694a2e','#4c3827');for(const [ox,oy,r] of [[0,143,39],[-24,155,30],[24,155,30],[0,121,28]])circle(treeX+ox,oy,r,'#3e763c','#285c2e')}for(const sq of g.squirrels){if(sq.hidden>0)continue;ctx.save();ctx.translate(sq.x,sq.y);ctx.scale((sq.v>0?1:-1)*.65,.65);ctx.strokeStyle='#704025';ctx.lineWidth=10;ctx.lineCap='round';ctx.beginPath();ctx.moveTo(-7,-3);ctx.bezierCurveTo(-24,-12,-30,-34,-15,-32);ctx.stroke();circle(-15,-32,8,'#a66b3f','#704025');ctx.fillStyle='#a66b3f';ctx.beginPath();ctx.ellipse(2,0,13,8,0,0,TAU);ctx.fill();circle(12,-7,7,'#ad784d','#704025');ctx.beginPath();ctx.moveTo(10,-12);ctx.lineTo(12,-20);ctx.lineTo(16,-12);ctx.fill();circle(15,-8,1.7,'#211b15');ctx.strokeStyle='#704025';ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(-4,6);ctx.lineTo(-7,11);ctx.moveTo(8,6);ctx.lineTo(11,11);ctx.stroke();ctx.restore()}if(g.npc){const n=g.npc;if(!n.collected)circle(n.ballX,n.ballY,5,'#8c532f','#e8c5a1');drawPerson({x:n.x,y:n.y,id:0,moving:true},'#76503a')}const r=g.retriever;if(r.active){ctx.save();ctx.translate(r.x,r.y);const tilt=r.target?Math.atan2(r.target.y-r.y,r.target.x-r.x)*.13:0;ctx.rotate(tilt);circle(0,13,31,'#1e342c55');rr(-30,-13,61,29,7,'#d5b13b','#354631');rr(-24,-20,33,13,4,'#e6c657','#766122');rr(7,-20,17,11,3,'#8eb0a8','#334b47');rr(-31,-6,10,20,3,'#a0a99b','#36473b');rr(24,-6,10,20,3,'#a0a99b','#36473b');for(const wx of [-20,20]){circle(wx,19,10,'#242b28','#131c18');circle(wx,19,4,'#8d9b92')}rr(-35,3,13,8,2,'#bbc8ac','#425644');for(let k=0;k<5;k++){ctx.strokeStyle='#e4e9d3';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(-34,4+k);ctx.lineTo(-24,4+k);ctx.stroke()}circle(3,-24,6,'#e8bb91','#5e513c');rr(-4,-19,13,9,3,'#446b41');text('RANGE',-4,-2,8,'#3c482a','center',900);ctx.restore()}for(const b of g.balls){if(!b.firstMarker||b.owner<0||b.collected||b.first&&!(b.markerFade>0))continue;ctx.save();ctx.globalAlpha=b.first?b.markerFade/.2:.65;ctx.strokeStyle=players[b.owner].color;ctx.lineWidth=2;ctx.beginPath();ctx.arc(b.firstMarker.x,b.firstMarker.y,b.first?7+(1-b.markerFade/.2)*6:7,0,TAU);ctx.stroke();ctx.restore()}for(const a of g.actors){const preview=drAimPreview(a);if(preview?.firstMarker){const p=preview.firstMarker;ctx.save();ctx.setLineDash(a.charging?[7,6]:[]);ctx.strokeStyle=players[a.id].color;ctx.lineWidth=a.charging?2.5:2;ctx.globalAlpha=a.charging?.9:.75;ctx.beginPath();ctx.moveTo(preview.launchX,preview.launchY);ctx.lineTo(p.x,p.y);ctx.stroke();if(!a.charging){ctx.beginPath();ctx.arc(p.x,p.y,4,0,TAU);ctx.stroke();}ctx.restore();if(a.charging)circle(p.x,p.y,6,players[a.id].color,'#ffffff')}drawPerson({x:a.x,y:a.y,id:a.id,facing:a.aim-Math.PI/2,moving:a.flash>0},players[a.id].color);circle(a.x,a.y-28,6,players[a.id].color,'#fff3d0');text(players[a.id].name.toUpperCase(),a.x,a.y-42,12,players[a.id].color,'center',900);rr(a.x-48,770,96,10,3,'#223e2f','#a4bc82');rr(a.x-46,772,92*a.charge,6,2,players[a.id].color);text('POWER',a.x,793,10,players[a.id].color,'center',900)}const drStatus=g.resolving?'FINAL BALLS IN PLAY':Math.max(0,Math.ceil(90-g.time))+'s';rr(657,113,126,32,9,'#193c2ae8','#b9ca8c');text(drStatus,720,129,13,'#fff2ca','center',850);}
+function drawDrivingRange(){const g=game;ctx.fillStyle='#426d3e';ctx.fillRect(0,96,W,710);rr(315,106,810,676,16,'#6b9850','#a7bd79');for(let i=0;i<9;i++){ctx.strokeStyle=i%2?'#7daa60':'#80a967';ctx.lineWidth=16;ctx.beginPath();ctx.moveTo(355+i*90,120);ctx.lineTo(355+i*90,730);ctx.stroke()}for(const treeX of [344,1090]){ctx.fillStyle='#694a2e';rr(treeX-8,143,16,85,4,'#694a2e','#4c3827');for(const [ox,oy,r] of [[0,143,39],[-24,155,30],[24,155,30],[0,121,28]])circle(treeX+ox,oy,r,'#3e763c','#285c2e')}for(const z of DR_GREENS){ctx.save();ctx.translate(z.x,z.y);ctx.beginPath();for(let j=0;j<=50;j++){const t=j/50*TAU,rad=1+.055*Math.sin(t*3+z.phase);const x=Math.cos(t)*z.rx*rad,y=Math.sin(t)*z.ry*rad;if(j===0)ctx.moveTo(x,y);else ctx.lineTo(x,y)}ctx.closePath();ctx.fillStyle='#9dd476';ctx.fill();ctx.strokeStyle='#d3ec9c';ctx.lineWidth=3;ctx.stroke();ctx.restore();ctx.strokeStyle='#f4e5ba';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(z.x,z.y+6);ctx.lineTo(z.x,z.y-28);ctx.stroke();ctx.fillStyle='#f6cf61';ctx.beginPath();ctx.moveTo(z.x,z.y-28);ctx.lineTo(z.x+17,z.y-22);ctx.lineTo(z.x,z.y-16);ctx.fill();text('+'+z.points,z.x,z.y+z.ry+16,12,'#fff4c9','center',900)}rr(317,154,806,29,4,'#d4bc87','#f3e0ae');for(let k=0;k<26;k++)circle(331+k*30,164+(k%3)*4,2,'#bfa36d');for(const b of g.balls){if(b.collected)continue;const color=b.owner<0?'#e9e4c9':players[b.owner].color;circle(b.x,b.y,5.3,color,'#1d3621');if(b.z>0){ctx.globalAlpha=.22;circle(b.x+5,b.y+3,5,'#132f1c');ctx.globalAlpha=1;circle(b.x,b.y-b.z,7,color,'#fff4d0')}}for(const treeX of [344,1090]){rr(treeX-8,143,16,85,4,'#694a2e','#4c3827');for(const [ox,oy,r] of [[0,143,39],[-24,155,30],[24,155,30],[0,121,28]])circle(treeX+ox,oy,r,'#3e763c','#285c2e')}for(const sq of g.squirrels){if(sq.hidden>0)continue;ctx.save();ctx.translate(sq.x,sq.y);ctx.scale((sq.v>0?1:-1)*.65,.65);ctx.strokeStyle='#704025';ctx.lineWidth=10;ctx.lineCap='round';ctx.beginPath();ctx.moveTo(-7,-3);ctx.bezierCurveTo(-24,-12,-30,-34,-15,-32);ctx.stroke();circle(-15,-32,8,'#a66b3f','#704025');ctx.fillStyle='#a66b3f';ctx.beginPath();ctx.ellipse(2,0,13,8,0,0,TAU);ctx.fill();circle(12,-7,7,'#ad784d','#704025');ctx.beginPath();ctx.moveTo(10,-12);ctx.lineTo(12,-20);ctx.lineTo(16,-12);ctx.fill();circle(15,-8,1.7,'#211b15');ctx.strokeStyle='#704025';ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(-4,6);ctx.lineTo(-7,11);ctx.moveTo(8,6);ctx.lineTo(11,11);ctx.stroke();ctx.restore()}if(g.npc){const n=g.npc;if(!n.collected)circle(n.ballX,n.ballY,5,'#8c532f','#e8c5a1');drawPerson({x:n.x,y:n.y,id:0,moving:true},'#76503a')}const r=g.retriever;if(r.active){ctx.save();ctx.translate(r.x,r.y);const tilt=r.target?Math.atan2(r.target.y-r.y,r.target.x-r.x)*.13:0;ctx.rotate(tilt);circle(0,13,31,'#1e342c55');rr(-30,-13,61,29,7,'#d5b13b','#354631');rr(-24,-20,33,13,4,'#e6c657','#766122');rr(7,-20,17,11,3,'#8eb0a8','#334b47');rr(-31,-6,10,20,3,'#a0a99b','#36473b');rr(24,-6,10,20,3,'#a0a99b','#36473b');for(const wx of [-20,20]){circle(wx,19,10,'#242b28','#131c18');circle(wx,19,4,'#8d9b92')}rr(-35,3,13,8,2,'#bbc8ac','#425644');for(let k=0;k<5;k++){ctx.strokeStyle='#e4e9d3';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(-34,4+k);ctx.lineTo(-24,4+k);ctx.stroke()}circle(3,-24,6,'#e8bb91','#5e513c');rr(-4,-19,13,9,3,'#446b41');text('RANGE',-4,-2,8,'#3c482a','center',900);ctx.restore()}for(const b of g.balls){if(!b.firstMarker||b.owner<0||b.collected||b.first&&!(b.markerFade>0))continue;ctx.save();ctx.globalAlpha=b.first?b.markerFade/.2:.65;ctx.strokeStyle=players[b.owner].color;ctx.lineWidth=2;ctx.beginPath();ctx.arc(b.firstMarker.x,b.firstMarker.y,b.first?7+(1-b.markerFade/.2)*6:7,0,TAU);ctx.stroke();ctx.restore()}for(const a of g.actors){const preview=drAimPreview(a);if(preview?.firstMarker){const p=preview.firstMarker;ctx.save();ctx.setLineDash(a.charging?[7,6]:[]);ctx.strokeStyle=players[a.id].color;ctx.lineWidth=a.charging?2.5:2;ctx.globalAlpha=a.charging?.9:.75;ctx.beginPath();ctx.moveTo(preview.launchX,preview.launchY);ctx.lineTo(p.x,p.y);ctx.stroke();if(!a.charging){ctx.beginPath();ctx.arc(p.x,p.y,4,0,TAU);ctx.stroke();}ctx.restore();if(a.charging)circle(p.x,p.y,6,players[a.id].color,'#ffffff')}drawPerson({x:a.x,y:a.y,id:a.id,facing:a.aim-Math.PI/2,moving:a.flash>0},players[a.id].color);const tee=drLaunchPoint(a);circle(tee.x,tee.y,6,players[a.id].color,'#fff3d0');text(players[a.id].name.toUpperCase(),a.x,a.y-42,12,players[a.id].color,'center',900);rr(a.x-48,770,96,10,3,'#223e2f','#a4bc82');rr(a.x-46,772,92*a.charge,6,2,players[a.id].color);text('POWER',a.x,793,10,players[a.id].color,'center',900)}const drStatus=g.resolving?'FINAL BALLS IN PLAY':Math.max(0,Math.ceil(90-g.time))+'s';rr(657,113,126,32,9,'#193c2ae8','#b9ca8c');text(drStatus,720,129,13,'#fff2ca','center',850);}
 
 // POWERWHEEL PANDEMONIUM — v115: PowerWheel scale, five-lap races, shared upgrade garage, and physical contact rotation; v106 balance preserved.
 // Every base body has 40 points. Each upgraded body adds five usable points.
